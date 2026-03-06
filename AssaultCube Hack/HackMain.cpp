@@ -28,19 +28,43 @@ void OnInitialize( )
 }
 
 
-void OnHackSet( CHack *pHack )
+void OnHackSet(CHack* pHack)
 {
     //Disable fly mode once.
-    if ( !_stricmp( pHack->GetName( ), "Fly" ) && !pHack->GetEnabled( ) && Game::GetInstance( ) && Game::GetInstance( )->m_LocalPlayer )
+    if (!_stricmp(pHack->GetName(), "Fly") && !pHack->GetEnabled() && Game::GetInstance() && Game::GetInstance()->m_LocalPlayer)
     {
-        Game::GetInstance( )->m_LocalPlayer->m_SpectateMode = SM_NONE;
+        Game::GetInstance()->m_LocalPlayer->m_SpectateMode = SM_NONE;
     }
 
     //Patch Recoil
-    if ( !_stricmp( pHack->GetName( ), "No Recoil" ) )
+    if (!_stricmp(pHack->GetName(), "No Recoil"))
     {
-        GameFunctions::PatchRecoil( pHack->GetEnabled( ) );
+        GameFunctions::PatchRecoil(pHack->GetEnabled());
     }
+
+    // ========== NEW: LOG AIMBOT TOGGLES ==========
+    if (!_stricmp(pHack->GetName(), "Aimbot"))
+    {
+        // Get game time (in milliseconds) from the known offset
+        DWORD gameTime = *reinterpret_cast<DWORD*>(OFFSET_LASTMILLIS);
+
+        // Get local player ID (if available)
+        int playerId = -1;
+        Game* pGame = Game::GetInstance();
+        if (pGame && pGame->m_LocalPlayer)
+        {
+            playerId = pGame->m_LocalPlayer->m_ClientID;
+        }
+
+        // Open log file in append mode (adjust path as needed)
+        FILE* logFile = fopen("C:\\AC_Logs\\aimbot_log.txt", "a");
+        if (logFile != NULL)
+        {
+            fprintf(logFile, "%u,%d,%d\n", gameTime, playerId, pHack->GetEnabled() ? 1 : 0);
+            fclose(logFile);
+        }
+    }
+    // ========== END OF NEW CODE ==========
 }
 
 void MenuRender( )
