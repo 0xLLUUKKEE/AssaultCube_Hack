@@ -6,23 +6,30 @@
 using namespace AssaultCube;
 using namespace Utils;
 
+#ifndef SV_TEXT
+#define SV_TEXT 6
+#endif
+#ifndef SV_TEAMTEXT
+#define SV_TEAMTEXT 7
+#endif
+
 CMenu *g_Menu = NULL;
 
 void OnInitialize( )
 {
     g_Menu = new CMenu( );
 
-    g_Menu->AddHack( new CHack( "Player ESP", false ) );
-    g_Menu->AddHack( new CHack( "Entity ESP", false ) );
-    g_Menu->AddHack( new CHack( "Grenade ESP", false ) );
+    //g_Menu->AddHack( new CHack( "Player ESP", false ) );
+    //g_Menu->AddHack( new CHack( "Entity ESP", false ) );
+    //g_Menu->AddHack( new CHack( "Grenade ESP", false ) );
     g_Menu->AddHack( new CHack( "Aimbot", false ) );
-    g_Menu->AddHack( new CHack( "Fly", false ) );
-    g_Menu->AddHack( new CHack( "No Recoil", false ) );
+  /*  g_Menu->AddHack( new CHack( "Fly", false ) );*/
+   /* g_Menu->AddHack( new CHack( "No Recoil", false ) );
     g_Menu->AddHack( new CHack( "Mass Kill", false ) );
     g_Menu->AddHack( new CHack( "Voice Spam", false ) );
     g_Menu->AddHack( new CHack( "Spam", false ) );
     g_Menu->AddHack( new CHack( "Quick Grenade", false ) );
-    g_Menu->AddHack( new CHack( "Entity Magnet", false ) );
+    g_Menu->AddHack( new CHack( "Entity Magnet", false ) );*/
 
     GameFunctions::AddHudLine( "Hack loaded." );
 }
@@ -42,29 +49,16 @@ void OnHackSet(CHack* pHack)
         GameFunctions::PatchRecoil(pHack->GetEnabled());
     }
 
-    // ========== NEW: LOG AIMBOT TOGGLES ==========
+    // ===== NEW: Send chat message when aimbot toggles =====
     if (!_stricmp(pHack->GetName(), "Aimbot"))
     {
-        // Get game time (in milliseconds) from the known offset
-        DWORD gameTime = *reinterpret_cast<DWORD*>(OFFSET_LASTMILLIS);
-
-        // Get local player ID (if available)
-        int playerId = -1;
-        Game* pGame = Game::GetInstance();
-        if (pGame && pGame->m_LocalPlayer)
-        {
-            playerId = pGame->m_LocalPlayer->m_ClientID;
-        }
-
-        // Open log file in append mode (adjust path as needed)
-        FILE* logFile = fopen("C:\\AC_Logs\\aimbot_log.txt", "a");
-        if (logFile != NULL)
-        {
-            fprintf(logFile, "%u,%d,%d\n", gameTime, playerId, pHack->GetEnabled() ? 1 : 0);
-            fclose(logFile);
-        }
+        //GameFunctions::AddHudLine("Aimbot toggled (HUD)"); // temporary
+        const char* msg = pHack->GetEnabled() ? "aimbot toggled on" : "aimbot toggled off";
+        char formatted[128];
+        sprintf(formatted, "[LOGGER] %s", msg);
+        GameFunctions::SendToServer(SV_TEXT, "rs", formatted);
     }
-    // ========== END OF NEW CODE ==========
+    // ===== END OF NEW CODE =====
 }
 
 void MenuRender( )
@@ -80,7 +74,7 @@ void MenuRender( )
     int MENUYOFFSET = 20;
     int MENUOPTOFFSET = 200;
 
-    GameFunctions::DrawString( MENUX, MENUY - 30, 255, 255, 255, "A200K's AssaultCube Hack" );
+    GameFunctions::DrawString( MENUX, MENUY - 30, 255, 255, 255, "==PETTIGREW_AIMBOT==" );
 
     int i = 0;
     for ( auto item = g_Menu->GetHacks( ).begin( ); item != g_Menu->GetHacks( ).end( ); ++item )
@@ -202,278 +196,328 @@ void DrawESP( Player *pTargetPlayer, Player *pLocalPlayer )
     }
 }
 
-void OnRenderFrame( )
+
+void OnRenderFrame()
 {
     //Toggle Menu
-    if ( GetAsyncKeyState( VK_INSERT ) & 1 )
-        g_Menu->SetIsVisible( !g_Menu->GetIsVisible( ) );
+    if (GetAsyncKeyState(VK_INSERT) & 1)
+        g_Menu->SetIsVisible(!g_Menu->GetIsVisible());
 
-    if ( g_Menu->GetIsVisible( ) )
+    if (g_Menu->GetIsVisible())
     {
-        MenuRender( );
-        MenuInput( );
+        MenuRender();
+        MenuInput();
     }
 
-    //Main Code
-
-    Game *pGame = Game::GetInstance( );
-    if ( !IsValidPtr( pGame ) )
+    // Only aimbot remains
+    Game* pGame = Game::GetInstance();
+    if (!IsValidPtr(pGame))
         return;
 
-    Player *pLocalPlayer = pGame->m_LocalPlayer;
-    if ( IsValidPtr( pLocalPlayer ) )
+    Player* pLocalPlayer = pGame->m_LocalPlayer;
+    if (!IsValidPtr(pLocalPlayer))
+        return;
+    Weapon * pLocalWeapon = pLocalPlayer->GetCurrentWeapon();
+
+    // Aimbot (already present)
+    if (g_Menu->GetHack("Aimbot")->GetEnabled())
     {
-        Weapon *pLocalWeapon = pLocalPlayer->GetCurrentWeapon( );
 
-        if ( g_Menu->GetHack( "Aimbot" )->GetEnabled( ) )
+        if (!pLocalWeapon->m_Reloading)
         {
-            if ( !pLocalWeapon->m_Reloading )
+            if ( GetAsyncKeyState( VK_RBUTTON ) & 0x8000 )
             {
-                if ( GetAsyncKeyState( VK_RBUTTON ) & 0x8000 )
+                Player *pAimTarget = GetAimbotTarget( pGame, pLocalPlayer );
+                if ( IsValidPtr( pAimTarget ) )
                 {
-                    Player *pAimTarget = GetAimbotTarget( pGame, pLocalPlayer );
-                    if ( IsValidPtr( pAimTarget ) )
-                    {
-                        Vec3 vAimPos = Vec3( pAimTarget->m_HeadPos.x, pAimTarget->m_HeadPos.y, pAimTarget->m_HeadPos.z );
-
-                        GameFunctions::DoAimBot( pLocalPlayer, vAimPos );
-
-                        //if ( bAutoShoot )
-                        //	pLocalPlayer->m_IsShooting = !pLocalPlayer->m_IsShooting;
-                    }
-                    //else
+                    Vec3 vAimPos = Vec3( pAimTarget->m_HeadPos.x, pAimTarget->m_HeadPos.y, pAimTarget->m_HeadPos.z );
+            
+                    GameFunctions::DoAimBot( pLocalPlayer, vAimPos );
+            
                     //if ( bAutoShoot )
-                    //	pLocalPlayer->m_IsShooting = false;
+                    //	pLocalPlayer->m_IsShooting = !pLocalPlayer->m_IsShooting;
                 }
-            }
-
-        }
-
-        if ( g_Menu->GetHack( "Voice Spam" )->GetEnabled( ) )
-        {
-            if ( g_Menu->GetHack( "Voice Spam" )->GetLastTick( ) < GetTickCount( ) )
-            {
-                g_Menu->GetHack( "Voice Spam" )->SetLastTick( GetTickCount( ) + 4100 );
-
-                //Usually no normal player will see YOU are spamming, you won't hear the spam either. But for some reason some admins can still find our you are spamming lol.
-                GameFunctions::SendToServer( SV_VOICECOM, "ri", S_COMINGINWITHTHEFLAG );
-            }
-        }
-
-        if ( g_Menu->GetHack( "Fly" )->GetEnabled( ) )
-        {
-            pLocalPlayer->m_SpectateMode = SM_FLY;
-        }
-
-
-        if ( g_Menu->GetHack( "Spam" )->GetEnabled( ) )
-        {
-            //Spams "Player % switched to team %" into the chat lol
-            if ( g_Menu->GetHack( "Spam" )->GetLastTick( ) < GetTickCount( ) )
-            {
-                g_Menu->GetHack( "Spam" )->SetLastTick( GetTickCount( ) + 20 );
-
-                GameFunctions::SendToServer( SV_SWITCHTEAM, "ri", TEAM_SPECT );
-                GameFunctions::SendToServer( SV_TRYSPAWN, "r" );
-            }
-        }
-
-        if ( g_Menu->GetHack( "Quick Grenade" )->GetEnabled( ) )
-            pLocalPlayer->m_Weapons[GUN_GRENADE]->m_Info->m_AttackDelay = 0;
-        else
-            pLocalPlayer->m_Weapons[GUN_GRENADE]->m_Info->m_AttackDelay = 650;
-
-        if ( g_Menu->GetHack( "Mass Kill" )->GetEnabled( ) )
-        {
-            for ( int i = 0; i < pGame->m_PlayerCount; i++ )
-            {
-                Player* pPlayer = pGame->GetPlayer( i );
-                if ( !IsValidPtr( pPlayer ) )
-                    continue;
-
-                if ( pPlayer == pLocalPlayer )
-                    continue;
-
-                if ( pPlayer->m_State != CS_ALIVE )
-                    continue;
-
-                if ( pPlayer->m_Health <= 0 || pPlayer->m_Health > 100 )
-                    continue;
-
-                if ( pPlayer->m_HeadPos.x == 0 && pPlayer->m_HeadPos.y == 0 && pPlayer->m_HeadPos.z == 0 )
-                    continue;
-
-                if ( GameFunctions::GotTeamMates( ) )
-                {
-                    if ( pLocalPlayer->m_Team == pPlayer->m_Team ) //No Teammates
-                        continue;
-                }
-
-                if ( GetAsyncKeyState( VK_RBUTTON ) )
-                {
-                    if ( g_Menu->GetHack( "Mass Kill" )->GetLastTick( ) < GetTickCount( ) )
-                    {
-
-                        g_Menu->GetHack( "Mass Kill" )->SetLastTick( GetTickCount( ) + pLocalPlayer->GetCurrentWeapon( )->m_Info->m_AttackDelay );
-
-                        if ( pLocalPlayer->GetCurrentWeapon( )->m_Reloading == 0 && ( *pLocalPlayer->GetCurrentWeapon( )->m_Ammo > 0 || *pLocalPlayer->GetCurrentWeapon( )->m_AmmoInReserve ) )
-                        {
-                            if ( ( *pLocalPlayer->GetCurrentWeapon( )->m_Ammo )-- <= 0 )
-                            {
-                                g_Menu->GetHack( "Mass Kill" )->SetLastTick( GetTickCount( ) + pLocalPlayer->GetCurrentWeapon( )->m_Info->m_ReloadTime );
-                            }
-                            else
-                            {
-                                // Take care with shotgun though, there are special checks and handling for this one.
-                                GameFunctions::SendShot( pPlayer, pLocalPlayer, pLocalPlayer->m_GunSelect ); //Only works in multiplayer
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if ( g_Menu->GetHack( "Entity Magnet" )->GetEnabled( ) )
-        {
-            EntityList *pEntities = EntityList::GetInstance( );
-            if ( IsValidPtr( pEntities ) )
-            {
-                for ( int i = 0; i < pEntities->m_EntityCount; i++ )
-                {
-                    Entity *pEntity = pEntities->GetEntity( i );
-                    if ( !IsValidPtr( pEntity ) )
-                        continue;
-
-                    // Only spawned items
-                    if ( pEntity->spawned == FALSE )
-                        continue;
-
-                    float flNewZ = ( float )( 1 + sinf( *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS ) / 100.0f + pEntity->x + pEntity->y ) / 20 );
-                    // fix height according to the map data
-                    flNewZ += ( &( *reinterpret_cast< sqr** >( OFFSET_WORLD ) )[( ( pEntity->y ) << ( *reinterpret_cast< DWORD* >( OFFSET_SFACTOR ) ) ) + ( pEntity->x )] )->floor + pEntity->attr1;
-
-                    Vec3 vPos = Vec3( pEntity->x, pEntity->y, flNewZ );
-
-                    float flDistance = pLocalPlayer->m_FootPos.dist( vPos );
-
-                    // Sadly the server sided anti cheat detects and reports you if the range is >= 10
-
-                    if ( flDistance < 10.0 )
-                    {
-                        GameFunctions::SendToServer( SV_ITEMPICKUP, "ri", i );
-                    }
-                }
-            }
-        }
-
-        if ( g_Menu->GetHack( "Grenade ESP" )->GetEnabled( ) )
-        {
-            BounceEntityList *pEntityList = BounceEntityList::GetInstance( );
-
-            for ( int i = 0; i < pEntityList->m_EntityCount; i++ )
-            {
-                BounceEntity *pEntity = pEntityList->GetEntity( i );
-                if ( !IsValidPtr( pEntity ) )
-                    continue;
-
-                if ( pEntity->m_Bouncetype != BT_NADE )
-                    continue;
-
-                Vec3 vScreen;
-                if ( GameFunctions::WorldToScreen( pEntity->m_HeadPos, &vScreen ) )
-                {
-                    DWORD dwCurrentMillis = *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS );
-                    DWORD dwExplodeTime = pEntity->m_Millis + pEntity->m_TimeToLive;
-
-                    DWORD dwTimeLeft = dwExplodeTime - dwCurrentMillis;
-
-                    GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 128, 100, "[%ims]", dwTimeLeft );
-                }
-            }
-        }
-
-        if ( g_Menu->GetHack( "Player ESP" )->GetEnabled( ) )
-        {
-            for ( int i = 0; i < pGame->m_PlayerCount; i++ )
-            {
-                Player* pPlayer = pGame->GetPlayer( i );
-                if ( !IsValidPtr( pPlayer ) )
-                    continue;
-
-                if ( pPlayer == pLocalPlayer )
-                    continue;
-
-                if ( pPlayer->m_State != CS_ALIVE )
-                    continue;
-
-                if ( pPlayer->m_Health <= 0 || pPlayer->m_Health > 100 )
-                    continue;
-
-                if ( pPlayer->m_HeadPos.x == 0 && pPlayer->m_HeadPos.y == 0 && pPlayer->m_HeadPos.z == 0 )
-                    continue;
-
-                if ( GameFunctions::GotTeamMates( ) )
-                {
-                    if ( pLocalPlayer->m_Team == pPlayer->m_Team ) //No Teammates
-                        continue;
-                }
-
-                DrawESP( pPlayer, pLocalPlayer );
-            }
-        }
-
-        if ( g_Menu->GetHack( "Entity ESP" )->GetEnabled( ) )
-        {
-            EntityList *pEntities = EntityList::GetInstance( );
-            if ( IsValidPtr( pEntities ) )
-            {
-                for ( int i = 0; i < pEntities->m_EntityCount; i++ )
-                {
-                    Entity *pEntity = pEntities->GetEntity( i );
-                    if ( !IsValidPtr( pEntity ) )
-                        continue;
-
-                    // Only visible items
-                    if ( pEntity->spawned == FALSE )
-                        continue;
-
-                    // very ugly way but this is what the engine does because the items bounce slightly up and down
-                    float flNewZ = ( float )( 1 + sinf( *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS ) / 100.0f + pEntity->x + pEntity->y ) / 20 );
-                    // fix height according to the map data
-                    flNewZ += ( &( *reinterpret_cast< sqr** >( OFFSET_WORLD ) )[( ( pEntity->y ) << ( *reinterpret_cast< DWORD* >( OFFSET_SFACTOR ) ) ) + ( pEntity->x )] )->floor + pEntity->attr1;
-
-                    Vec3 vPos = Vec3( pEntity->x, pEntity->y, flNewZ );
-
-                    Vec3 vScreen;
-                    if ( GameFunctions::WorldToScreen( vPos, &vScreen ) )
-                    {
-                        switch ( pEntity->type )
-                        {
-                        case I_HEALTH:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Health]" );
-                            break;
-                        case I_AMMO:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Ammo]" );
-                            break;
-                        case I_AKIMBO:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Akimbo]" );
-                            break;
-                        case I_ARMOUR:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Armor]" );
-                            break;
-                        case CTF_FLAG:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Flag]" );
-                            break;
-                        case I_GRENADE:
-                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Grenade]" );
-                            break;
-                        default:
-                            //GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[%X]", pEntity );
-                            break;
-                        }
-                    }
-                }
+                //else
+                //if ( bAutoShoot )
+                //	pLocalPlayer->m_IsShooting = false;
             }
         }
     }
+
+    // All other hacks have been removed
 }
+//void OnRenderFrame( )
+//{
+//    //Toggle Menu
+//    if ( GetAsyncKeyState( VK_INSERT ) & 1 )
+//        g_Menu->SetIsVisible( !g_Menu->GetIsVisible( ) );
+//
+//    if ( g_Menu->GetIsVisible( ) )
+//    {
+//        MenuRender( );
+//        MenuInput( );
+//    }
+//
+//    //Main Code
+//
+//    Game *pGame = Game::GetInstance( );
+//    if ( !IsValidPtr( pGame ) )
+//        return;
+//
+//    Player *pLocalPlayer = pGame->m_LocalPlayer;
+//    if ( IsValidPtr( pLocalPlayer ) )
+//    {
+//        Weapon *pLocalWeapon = pLocalPlayer->GetCurrentWeapon( );
+//
+//        if ( g_Menu->GetHack( "Aimbot" )->GetEnabled( ) )
+//        {
+//            if ( !pLocalWeapon->m_Reloading )
+//            {
+//                if ( GetAsyncKeyState( VK_RBUTTON ) & 0x8000 )
+//                {
+//                    Player *pAimTarget = GetAimbotTarget( pGame, pLocalPlayer );
+//                    if ( IsValidPtr( pAimTarget ) )
+//                    {
+//                        Vec3 vAimPos = Vec3( pAimTarget->m_HeadPos.x, pAimTarget->m_HeadPos.y, pAimTarget->m_HeadPos.z );
+//
+//                        GameFunctions::DoAimBot( pLocalPlayer, vAimPos );
+//
+//                        //if ( bAutoShoot )
+//                        //	pLocalPlayer->m_IsShooting = !pLocalPlayer->m_IsShooting;
+//                    }
+//                    //else
+//                    //if ( bAutoShoot )
+//                    //	pLocalPlayer->m_IsShooting = false;
+//                }
+//            }
+//
+//        }
+//
+//        if ( g_Menu->GetHack( "Voice Spam" )->GetEnabled( ) )
+//        {
+//            if ( g_Menu->GetHack( "Voice Spam" )->GetLastTick( ) < GetTickCount( ) )
+//            {
+//                g_Menu->GetHack( "Voice Spam" )->SetLastTick( GetTickCount( ) + 4100 );
+//
+//                //Usually no normal player will see YOU are spamming, you won't hear the spam either. But for some reason some admins can still find our you are spamming lol.
+//                GameFunctions::SendToServer( SV_VOICECOM, "ri", S_NICESHOT );
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Fly" )->GetEnabled( ) )
+//        {
+//            pLocalPlayer->m_SpectateMode = SM_FLY;
+//        }
+//
+//
+//        if ( g_Menu->GetHack( "Spam" )->GetEnabled( ) )
+//        {
+//            //Spams "Player % switched to team %" into the chat lol
+//            if ( g_Menu->GetHack( "Spam" )->GetLastTick( ) < GetTickCount( ) )
+//            {
+//                g_Menu->GetHack( "Spam" )->SetLastTick( GetTickCount( ) + 20 );
+//
+//                GameFunctions::SendToServer( SV_SWITCHTEAM, "ri", TEAM_SPECT );
+//                GameFunctions::SendToServer( SV_TRYSPAWN, "r" );
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Quick Grenade" )->GetEnabled( ) )
+//            pLocalPlayer->m_Weapons[GUN_GRENADE]->m_Info->m_AttackDelay = 0;
+//        else
+//            pLocalPlayer->m_Weapons[GUN_GRENADE]->m_Info->m_AttackDelay = 650;
+//
+//        if ( g_Menu->GetHack( "Mass Kill" )->GetEnabled( ) )
+//        {
+//            for ( int i = 0; i < pGame->m_PlayerCount; i++ )
+//            {
+//                Player* pPlayer = pGame->GetPlayer( i );
+//                if ( !IsValidPtr( pPlayer ) )
+//                    continue;
+//
+//                if ( pPlayer == pLocalPlayer )
+//                    continue;
+//
+//                if ( pPlayer->m_State != CS_ALIVE )
+//                    continue;
+//
+//                if ( pPlayer->m_Health <= 0 || pPlayer->m_Health > 100 )
+//                    continue;
+//
+//                if ( pPlayer->m_HeadPos.x == 0 && pPlayer->m_HeadPos.y == 0 && pPlayer->m_HeadPos.z == 0 )
+//                    continue;
+//
+//                if ( GameFunctions::GotTeamMates( ) )
+//                {
+//                    if ( pLocalPlayer->m_Team == pPlayer->m_Team ) //No Teammates
+//                        continue;
+//                }
+//
+//                if ( GetAsyncKeyState( VK_RBUTTON ) )
+//                {
+//                    if ( g_Menu->GetHack( "Mass Kill" )->GetLastTick( ) < GetTickCount( ) )
+//                    {
+//
+//                        g_Menu->GetHack( "Mass Kill" )->SetLastTick( GetTickCount( ) + pLocalPlayer->GetCurrentWeapon( )->m_Info->m_AttackDelay );
+//
+//                        if ( pLocalPlayer->GetCurrentWeapon( )->m_Reloading == 0 && ( *pLocalPlayer->GetCurrentWeapon( )->m_Ammo > 0 || *pLocalPlayer->GetCurrentWeapon( )->m_AmmoInReserve ) )
+//                        {
+//                            if ( ( *pLocalPlayer->GetCurrentWeapon( )->m_Ammo )-- <= 0 )
+//                            {
+//                                g_Menu->GetHack( "Mass Kill" )->SetLastTick( GetTickCount( ) + pLocalPlayer->GetCurrentWeapon( )->m_Info->m_ReloadTime );
+//                            }
+//                            else
+//                            {
+//                                // Take care with shotgun though, there are special checks and handling for this one.
+//                                GameFunctions::SendShot( pPlayer, pLocalPlayer, pLocalPlayer->m_GunSelect ); //Only works in multiplayer
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Entity Magnet" )->GetEnabled( ) )
+//        {
+//            EntityList *pEntities = EntityList::GetInstance( );
+//            if ( IsValidPtr( pEntities ) )
+//            {
+//                for ( int i = 0; i < pEntities->m_EntityCount; i++ )
+//                {
+//                    Entity *pEntity = pEntities->GetEntity( i );
+//                    if ( !IsValidPtr( pEntity ) )
+//                        continue;
+//
+//                    // Only spawned items
+//                    if ( pEntity->spawned == FALSE )
+//                        continue;
+//
+//                    float flNewZ = ( float )( 1 + sinf( *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS ) / 100.0f + pEntity->x + pEntity->y ) / 20 );
+//                    // fix height according to the map data
+//                    flNewZ += ( &( *reinterpret_cast< sqr** >( OFFSET_WORLD ) )[( ( pEntity->y ) << ( *reinterpret_cast< DWORD* >( OFFSET_SFACTOR ) ) ) + ( pEntity->x )] )->floor + pEntity->attr1;
+//
+//                    Vec3 vPos = Vec3( pEntity->x, pEntity->y, flNewZ );
+//
+//                    float flDistance = pLocalPlayer->m_FootPos.dist( vPos );
+//
+//                    // Sadly the server sided anti cheat detects and reports you if the range is >= 10
+//
+//                    if ( flDistance < 10.0 )
+//                    {
+//                        GameFunctions::SendToServer( SV_ITEMPICKUP, "ri", i );
+//                    }
+//                }
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Grenade ESP" )->GetEnabled( ) )
+//        {
+//            BounceEntityList *pEntityList = BounceEntityList::GetInstance( );
+//
+//            for ( int i = 0; i < pEntityList->m_EntityCount; i++ )
+//            {
+//                BounceEntity *pEntity = pEntityList->GetEntity( i );
+//                if ( !IsValidPtr( pEntity ) )
+//                    continue;
+//
+//                if ( pEntity->m_Bouncetype != BT_NADE )
+//                    continue;
+//
+//                Vec3 vScreen;
+//                if ( GameFunctions::WorldToScreen( pEntity->m_HeadPos, &vScreen ) )
+//                {
+//                    DWORD dwCurrentMillis = *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS );
+//                    DWORD dwExplodeTime = pEntity->m_Millis + pEntity->m_TimeToLive;
+//
+//                    DWORD dwTimeLeft = dwExplodeTime - dwCurrentMillis;
+//
+//                    GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 128, 100, "[%ims]", dwTimeLeft );
+//                }
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Player ESP" )->GetEnabled( ) )
+//        {
+//            for ( int i = 0; i < pGame->m_PlayerCount; i++ )
+//            {
+//                Player* pPlayer = pGame->GetPlayer( i );
+//                if ( !IsValidPtr( pPlayer ) )
+//                    continue;
+//
+//                if ( pPlayer == pLocalPlayer )
+//                    continue;
+//
+//                if ( pPlayer->m_State != CS_ALIVE )
+//                    continue;
+//
+//                if ( pPlayer->m_Health <= 0 || pPlayer->m_Health > 100 )
+//                    continue;
+//
+//                if ( pPlayer->m_HeadPos.x == 0 && pPlayer->m_HeadPos.y == 0 && pPlayer->m_HeadPos.z == 0 )
+//                    continue;
+//
+//                if ( GameFunctions::GotTeamMates( ) )
+//                {
+//                    if ( pLocalPlayer->m_Team == pPlayer->m_Team ) //No Teammates
+//                        continue;
+//                }
+//
+//                DrawESP( pPlayer, pLocalPlayer );
+//            }
+//        }
+//
+//        if ( g_Menu->GetHack( "Entity ESP" )->GetEnabled( ) )
+//        {
+//            EntityList *pEntities = EntityList::GetInstance( );
+//            if ( IsValidPtr( pEntities ) )
+//            {
+//                for ( int i = 0; i < pEntities->m_EntityCount; i++ )
+//                {
+//                    Entity *pEntity = pEntities->GetEntity( i );
+//                    if ( !IsValidPtr( pEntity ) )
+//                        continue;
+//
+//                    // Only visible items
+//                    if ( pEntity->spawned == FALSE )
+//                        continue;
+//
+//                    // very ugly way but this is what the engine does because the items bounce slightly up and down
+//                    float flNewZ = ( float )( 1 + sinf( *reinterpret_cast< DWORD* >( OFFSET_LASTMILLIS ) / 100.0f + pEntity->x + pEntity->y ) / 20 );
+//                    // fix height according to the map data
+//                    flNewZ += ( &( *reinterpret_cast< sqr** >( OFFSET_WORLD ) )[( ( pEntity->y ) << ( *reinterpret_cast< DWORD* >( OFFSET_SFACTOR ) ) ) + ( pEntity->x )] )->floor + pEntity->attr1;
+//
+//                    Vec3 vPos = Vec3( pEntity->x, pEntity->y, flNewZ );
+//
+//                    Vec3 vScreen;
+//                    if ( GameFunctions::WorldToScreen( vPos, &vScreen ) )
+//                    {
+//                        switch ( pEntity->type )
+//                        {
+//                        case I_HEALTH:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Health]" );
+//                            break;
+//                        case I_AMMO:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Ammo]" );
+//                            break;
+//                        case I_AKIMBO:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Akimbo]" );
+//                            break;
+//                        case I_ARMOUR:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Armor]" );
+//                            break;
+//                        case CTF_FLAG:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Flag]" );
+//                            break;
+//                        case I_GRENADE:
+//                            GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[Grenade]" );
+//                            break;
+//                        default:
+//                            //GameFunctions::DrawString( vScreen.x, vScreen.y, 255, 255, 255, "[%X]", pEntity );
+//                            break;
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    }
+//}
